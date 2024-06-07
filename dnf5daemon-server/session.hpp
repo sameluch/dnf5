@@ -57,8 +57,8 @@ public:
         std::vector<std::unique_ptr<libdnf5::Logger>> && loggers,
         sdbus::IConnection & connection,
         dnfdaemon::KeyValueMap session_configuration,
-        std::string object_path,
-        std::string sender);
+        const sdbus::ObjectPath & object_path,
+        const std::string & sender);
     ~Session();
 
     template <typename ItemType>
@@ -70,7 +70,7 @@ public:
         return dnfdaemon::key_value_map_get<ItemType>(session_configuration, key);
     }
 
-    const sdbus::ObjectPath & get_object_path() const { return object_path; };
+    const sdbus::ObjectPath & get_object_path() { return object_path; };
     sdbus::IConnection & get_connection() { return connection; };
     libdnf5::Base * get_base() { return base.get(); };
     ThreadsManager & get_threads_manager() { return threads_manager; };
