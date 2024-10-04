@@ -99,6 +99,7 @@ public:
     void set_cancel_download(CancelDownload value) { cancel_download.store(value); }
 
     void reset_goal();
+    void reset_base();
 
 private:
     void setup_base();
