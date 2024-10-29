@@ -166,6 +166,648 @@ void checksum_calc(unsigned char * out, fs::File & file) {
     solv_chksum_free(h, out);
 }
 
+// Add func here
+// #### XML FILTER CODE ####
+
+/***
+* Resize the buffer specified by ppszCharBuffer and update pnBufferMaxLen
+* to the length of the newly resized buffer if the nLengthToAdd would overflow
+* the buffer.
+***/
+uint32_t checkAndResizeBuffer(char ** ppszCharBuffer, int * pnBufferMaxLen, int nLengthToAdd) {
+    uint32_t dwError = 0;
+    char * pszTempCharBuffer = NULL;
+    if (ppszCharBuffer == NULL || *ppszCharBuffer == NULL || pnBufferMaxLen == NULL || *pnBufferMaxLen <= 0 ||
+        nLengthToAdd < 0) {
+        //error
+        return 1;
+    }
+
+    // calculate new max length
+    int nTempMaxLen = *pnBufferMaxLen;
+    int nBufferContentLen = (int) strlen(*ppszCharBuffer);
+    while (nBufferContentLen + nLengthToAdd + 1 >= nTempMaxLen) {
+        nTempMaxLen *= 2;
+    }
+    if (nTempMaxLen >= MAX_FILTER_INPUT_THRESHOLD) {
+        //error
+    }
+
+    // only realloc if the size changed
+    if (nTempMaxLen != *pnBufferMaxLen) {
+        pszTempCharBuffer = (char *) realloc(*ppszCharBuffer, nTempMaxLen);
+        if (!pszTempCharBuffer) {
+            //error
+            return 1;
+        }
+        //set expanded char buffer
+        *ppszCharBuffer = pszTempCharBuffer;
+        *pnBufferMaxLen = nTempMaxLen;
+    }
+
+    return dwError;
+}
+
+/***
+* allocate a new string in ppszDestStr location with the linted description,
+* all '&', '<', and '>' characters will be replaced with the xml escape
+* character versions of each in line.
+***/
+uint32_t xmlEscapeCharLinter(const char * pszStringToEscape, char ** ppszDestStr) {
+    uint32_t dwError = 0;
+    const char * amp = "&amp;";
+    const char * gt = "&gt;";
+    const char * lt = "&lt;";
+
+    if (pszStringToEscape == NULL || ppszDestStr == NULL) {
+        //error
+        return 1;
+    }
+
+    // allocate new string for linted string
+    size_t nStrToLintLen = (strlen(pszStringToEscape) + 1UL);  // add one for null char
+    char * pszLintedStr = (char *) malloc(nStrToLintLen * sizeof(char));
+    if (!pszLintedStr) {
+        //error
+        return 1;
+    }
+    bzero(pszLintedStr, nStrToLintLen * sizeof(char));
+    int nOffset = 0;
+    int nLintedSize = nStrToLintLen;
+
+    // Loop through string to lint looking for chars in need of escaping
+    for (int i = 0; i < nStrToLintLen; i++) {
+        char * pszCharToAdd = NULL;
+        int nAddStrlen = 1;
+        // check current char for escape character
+        switch (pszStringToEscape[i]) {
+            case '&':
+                pszCharToAdd = amp;
+                break;
+            case '>':
+                pszCharToAdd = gt;
+                break;
+            case '<':
+                pszCharToAdd = lt;
+                break;
+        }
+
+        //resize buffer if needed
+        if (pszCharToAdd != NULL) {
+            nAddStrlen = strlen(pszCharToAdd);
+        }
+        dwError = checkAndResizeBuffer(&pszLintedStr, &nLintedSize, nAddStrlen);
+        if (dwError) {
+            //error
+            return 1;
+        }
+
+        // add linted char
+        if (pszCharToAdd == NULL) {
+            pszLintedStr[i + nOffset] = pszStringToEscape[i];
+        } else {
+            strcat(pszLintedStr, pszCharToAdd);
+            nOffset += nAddStrlen - 1;  // minus 1 to account for the original space used by the character
+        }
+    }
+
+    // set Dest to linted string if all done
+    *ppszDestStr = pszLintedStr;
+
+    return dwError;
+}
+
+/***
+* allocate a new buffer to location pszElementBuffer of the size
+* nElementBufferMax or greater (in the case resizing is needed).
+* a formatted start element with the name and attrs specified will be
+* placed in the newly allocated buffer.
+***/
+uint32_t addElementStartToBuffer(
+    char ** pszElementBuffer, int * nElementBufferMax, const char * pszElementName, const char ** ppszAttrs) {
+    uint32_t dwError = 0;
+
+    if (pszElementBuffer == NULL || nElementBufferMax == NULL || *nElementBufferMax < 0) {
+        //error
+        return 1;
+    }
+
+    // set default buffer max length
+    if (*nElementBufferMax == 0) {
+        *nElementBufferMax = DEFAULT_TIME_FILTER_BUFF_SIZE;
+    }
+    *pszElementBuffer = (char *) malloc(*nElementBufferMax * sizeof(char));
+
+    char * pszLintedAttrVal = NULL;
+    char * pszTempBuffer = NULL;
+    dwError = checkAndResizeBuffer(pszElementBuffer, nElementBufferMax, strlen(pszElementName) + 2);
+    if (dwError) {
+        //error
+        return 1;
+    }
+    sprintf(*pszElementBuffer, "<%s", pszElementName);
+    for (int i = 0; ppszAttrs[i]; i += 2) {
+        dwError = xmlEscapeCharLinter(ppszAttrs[i + 1], &pszLintedAttrVal);
+        if (dwError) {
+            //error
+            return 1;
+        }
+        int nTempBufferLen = strlen(pszLintedAttrVal) + strlen(ppszAttrs[i]) + 5;
+        dwError = checkAndResizeBuffer(pszElementBuffer, nElementBufferMax, nTempBufferLen);
+        if (dwError) {
+            //error
+            return 1;
+        }
+        pszTempBuffer = (char *) malloc(sizeof(char) * nTempBufferLen);
+        if (!pszTempBuffer) {
+            //error
+            return 1;
+        }
+        sprintf(pszTempBuffer, " %s=\"%s\"", ppszAttrs[i], pszLintedAttrVal);
+        strcat(*pszElementBuffer, pszTempBuffer);
+
+        // free temp variables
+        free(pszTempBuffer);
+        pszTempBuffer = NULL;
+        free(pszLintedAttrVal);
+        pszLintedAttrVal = NULL;
+    }
+    strcat(*pszElementBuffer, ">");
+
+    if (pszLintedAttrVal) {
+        free(pszLintedAttrVal);
+    }
+    if (pszTempBuffer) {
+        free(pszTempBuffer);
+    }
+    return dwError;
+}
+
+/***
+ * 
+ ***/
+uint32_t addElementEndToBuffer(char ** pszElementBuffer, int * nElementBufferMaxLen, const char * pszElementName) {
+    uint32_t dwError = 0;
+    if (pszElementBuffer == NULL || nElementBufferMaxLen == NULL || *nElementBufferMaxLen < 0) {
+        //error
+        return 1;
+    }
+
+    if (*nElementBufferMaxLen == 0) {
+        *nElementBufferMaxLen = DEFAULT_TIME_FILTER_BUFF_SIZE;
+    }
+    *pszElementBuffer = (char *) malloc(*nElementBufferMaxLen * sizeof(char));
+
+    dwError = checkAndResizeBuffer(pszElementBuffer, nElementBufferMaxLen, strlen(pszElementName) + 4);
+    if (dwError) {
+        //error
+        return 1;
+    }
+    sprintf(*pszElementBuffer, "</%s>", pszElementName);
+
+    return dwError;
+}
+
+/***
+ * 
+ ***/
+uint32_t printElementStartToFile(FILE * pbOutfile, const char * pszElementName, const char ** ppszAttrs) {
+    uint32_t dwError = 0;
+    if (pbOutfile == NULL) {
+        //error
+        return 1;
+    }
+
+    int nStartElementBufferLength = DEFAULT_TIME_FILTER_BUFF_SIZE;
+    char * pszStartElement = NULL;
+
+    dwError = addElementStartToBuffer(&pszStartElement, &nStartElementBufferLength, pszElementName, ppszAttrs);
+    if (dwError) {
+        //error
+        return 1;
+    }
+    fprintf(pbOutfile, "%s", pszStartElement);
+    if (ferror(pbOutfile)) {
+        //error
+        return 1;
+    }
+
+    if (pszStartElement) {
+        free(pszStartElement);
+    }
+    return dwError;
+}
+
+/***
+ * 
+ ***/
+uint32_t printElementEndToFile(FILE * pbOutfile, const char * pszElementName) {
+    uint32_t dwError = 0;
+    if (pbOutfile == NULL) {
+        //error
+        return 1;
+    }
+
+    int nEndElementBufferLength = DEFAULT_TIME_FILTER_BUFF_SIZE;
+    char * pszEndElement = NULL;
+
+    dwError = addElementEndToBuffer(&pszEndElement, &nEndElementBufferLength, pszElementName);
+    if (dwError) {
+        //error
+        return 1;
+    }
+    fprintf(pbOutfile, "%s", pszEndElement);
+    if (ferror(pbOutfile)) {
+        //error
+        return 1;
+    }
+
+    if (pszEndElement) {
+        free(pszEndElement);
+    }
+    return dwError;
+}
+
+/***
+ * 
+ ***/
+void TDNFFilterStartElement(void * userData, const char * name, const char ** attrs) {
+    uint32_t dwError = 0;
+    char * pszStartElementBuffer = NULL;
+    // load tracking data
+    XMLFilterData * pTracking = (XMLFilterData *)userData;
+    int nAddNewLineAfterStart = pTracking->nPrevElement == 0;
+    char szNewLineBuffer[2];
+    if (nAddNewLineAfterStart) {
+        sprintf(szNewLineBuffer, "\n");
+    } else {
+        bzero(szNewLineBuffer, sizeof(szNewLineBuffer));  // don't assume memory zero'd
+    }
+
+    // increment depth
+    pTracking->nDepth += 1;
+    pTracking->nPrevElement = 0;
+
+    // new package to parse or currently parsing package info
+    if (strcmp(name, "package") == 0 || pTracking->nInPackage) {
+        pTracking->nInPackage = 1;
+
+        // already found/checked time
+        if (pTracking->nTimeFound && pTracking->nPrintPackage) {
+            fprintf(pTracking->pbOutfile, "%s", szNewLineBuffer);
+            if (ferror(pTracking->pbOutfile)) {
+                //error
+                return;
+            }
+
+            dwError = printElementStartToFile(pTracking->pbOutfile, name, attrs);
+            if (dwError) {
+                //error
+                return;
+            }
+        } else {  // still checking for time
+            if (strcmp(name, "time") == 0) {
+                // time found
+                // validate file POSIX time
+                for (int i = 0; attrs[i]; i += 2) {
+                    if (strcmp(attrs[i], "file") == 0) {
+                        // file time is the time the package is published to the repo
+                        // when this is less than our search time, allow the package to be
+                        // printed to the temp repo file, otherwise the current package
+                        // can be discarded.
+                        errno = 0;
+                        char * pszSnapshotTimeEnd = NULL;
+                        long nCurrentPackageTime = strtoll(attrs[i + 1], &pszSnapshotTimeEnd, 10);
+                        if (errno || pszSnapshotTimeEnd == attrs[i + 1]) {
+                            //error
+                            return;
+                        }
+                        pTracking->nPrintPackage = (nCurrentPackageTime <= pTracking->nSearchTime);
+                        pTracking->nTimeFound = 1;
+                        break;
+                    }
+                }
+                if (pTracking->nPrintPackage) {
+                    // print buffer when time is found
+                    fprintf(pTracking->pbOutfile, "%s", pTracking->pszElementBuffer);
+                    if (ferror(pTracking->pbOutfile)) {
+                        //error
+                        return;
+                    }
+
+                    fprintf(pTracking->pbOutfile, "%s", szNewLineBuffer);
+                    if (ferror(pTracking->pbOutfile)) {
+                        //error
+                        return;
+                    }
+
+                    // print time element
+                    dwError = printElementStartToFile(pTracking->pbOutfile, name, attrs);
+                    if (dwError) {
+                        //error
+                        return;
+                    }
+                }
+            } else if (!pTracking->nTimeFound) {
+                // if we haven't found a time yet, the element must be stored
+                // add to file buffer
+                int nStartElementBufferSize = DEFAULT_TIME_FILTER_BUFF_SIZE;
+                pszStartElementBuffer = NULL;
+
+                dwError = addElementStartToBuffer(&pszStartElementBuffer, &nStartElementBufferSize, name, attrs);
+                if (dwError) {
+                    //error
+                    return;
+                }
+                int nLenToAdd = strlen(pszStartElementBuffer);
+                nLenToAdd += strlen(szNewLineBuffer);  // +1 if newLine character present
+
+                dwError =
+                    checkAndResizeBuffer(&pszStartElementBuffer, &nStartElementBufferSize, strlen(szNewLineBuffer));
+                if (dwError) {
+                    //error
+                    return;
+                }
+                strcat(pszStartElementBuffer, szNewLineBuffer);
+
+                dwError = checkAndResizeBuffer(&(pTracking->pszElementBuffer), &(pTracking->nBufferMaxLen), nLenToAdd);
+                if (dwError) {
+                    //error
+                    return;
+                }
+                strcat(pTracking->pszElementBuffer, pszStartElementBuffer);
+            }
+        }
+    } else {  // not in a package or parsing a new package
+        fprintf(pTracking->pbOutfile, "%s", szNewLineBuffer);
+        if (ferror(pTracking->pbOutfile)) {
+            //error
+            return;
+        }
+        // output line
+        dwError = printElementStartToFile(pTracking->pbOutfile, name, attrs);
+        if (dwError) {
+            //error
+            return;
+        }
+    }
+
+    if (pszStartElementBuffer) {
+        free(pszStartElementBuffer);
+    }
+    return;
+}
+
+/***
+ * 
+ ***/
+void TDNFFilterEndElement(void * userData, const char * name) {
+    uint32_t dwError = 0;
+    char * pszElementBuffer = NULL;
+    // load tracking data
+    XMLFilterData * pTracking = (XMLFilterData *)userData;
+
+    // decrement depth
+    pTracking->nDepth -= 1;
+    pTracking->nPrevElement = 2;
+
+    if (!pTracking->nInPackage || pTracking->nPrintPackage) {
+        // print end element to file
+        dwError = printElementEndToFile(pTracking->pbOutfile, name);
+        if (dwError) {
+            //error
+            return;
+        }
+
+    } else if (pTracking->nInPackage && !pTracking->nTimeFound) {
+        int nEndElementBufferLen = DEFAULT_TIME_FILTER_BUFF_SIZE;
+        pszElementBuffer = NULL;
+
+        // add end element to buffer
+        dwError = addElementEndToBuffer(&pszElementBuffer, &nEndElementBufferLen, name);
+        if (dwError) {
+            //error
+            return;
+        }
+        int nEndElementLen = strlen(pszElementBuffer);
+
+        dwError = checkAndResizeBuffer(&(pTracking->pszElementBuffer), &(pTracking->nBufferMaxLen), nEndElementLen);
+        if (dwError) {
+            //error
+            return;
+        }
+        strcat(pTracking->pszElementBuffer, pszElementBuffer);
+
+    }  // else do nothing
+
+    if (strcmp(name, "package") == 0) {  // on end package, reset tracking function
+        // reset userData
+        pTracking->nBufferLen = 0;
+        bzero(pTracking->pszElementBuffer, pTracking->nBufferMaxLen);
+        pTracking->nInPackage = 0;
+        pTracking->nPrintPackage = 0;
+        pTracking->nTimeFound = 0;
+    }
+
+    if (pszElementBuffer) {
+        free(pszElementBuffer);
+    }
+    return;
+}
+
+/***
+ * 
+ ***/
+void TDNFFilterCharDataHandler(void * userData, const char * content, int length) {
+    uint32_t dwError = 0;
+    // load tracking data
+    XMLFilterData * pTracking = (XMLFilterData *)userData;
+    pTracking->nPrevElement = 1;
+
+    char * pszCharData = (char *) malloc((length + 1) * sizeof(char));
+    if (!pszCharData) {
+        //error
+        return;
+    }
+    bzero(pszCharData, (length + 1) * sizeof(char));
+    strncpy(pszCharData, content, length);
+    char * pszLintedCharData = NULL;
+    dwError = xmlEscapeCharLinter(pszCharData, &pszLintedCharData);
+    if (dwError) {
+        //error
+        return;
+    }
+
+    // check params
+    if (!pTracking->nInPackage || pTracking->nPrintPackage) {
+        // print to file
+        fprintf(pTracking->pbOutfile, "%s", pszLintedCharData);
+        if (ferror(pTracking->pbOutfile)) {
+            //error
+            return;
+        }
+    } else if (pTracking->nInPackage && !pTracking->nTimeFound) {
+        // add to buffer
+        dwError = checkAndResizeBuffer(
+            &(pTracking->pszElementBuffer), &(pTracking->nBufferMaxLen), strlen(pszLintedCharData));
+        if (dwError) {
+            //error
+            return;
+        }
+        strcat(pTracking->pszElementBuffer, pszLintedCharData);
+    }  // else do nothing (skipped package)
+
+    if (pszLintedCharData) {
+        free(pszLintedCharData);
+    }
+    if (pszCharData) {
+        free(pszCharData);
+    }
+    return;
+}
+
+/***
+ * 
+ ***/
+char * SolvFilterFile(const char * pszInFilePath, const char * pszSnapshotTime) {
+    // vars
+    XMLFilterData pData;
+    bzero(&pData, sizeof(XMLFilterData));
+    time_t nSnapshotTime;
+    bzero(&nSnapshotTime, sizeof(time_t));
+    XML_Parser bParser;
+    bzero(&bParser, sizeof(XML_Parser));
+    FILE * pbInFile = NULL;
+    FILE * pbOutFile = NULL;
+    char pszTimeExtension[100];
+    char * pszOutFilePath = NULL;
+
+    // convert snapshot string to time for use by the parser and the temp file name
+    errno = 0;
+    char * pszSnapshotTimeEnd = NULL;
+    nSnapshotTime = strtoll(pszSnapshotTime, &pszSnapshotTimeEnd, 10);
+    if (errno || pszSnapshotTimeEnd == pszSnapshotTime) {
+        //error
+        return NULL;
+    }
+
+    //create output file ending
+    sprintf(pszTimeExtension, "-%lld.xml", nSnapshotTime);
+
+    // find total extension length
+    int nInFileExtLen = 4;  // len of ".xml"
+    char * pszFileExt = strrchr(pszInFilePath, '.');
+    if (strcmp(pszFileExt, ".xml") != 0) {
+        nInFileExtLen += strlen(pszFileExt);
+    }
+
+    // calculate outfile length and allocate
+    int nInFileLen = strlen(pszInFilePath);
+    int nOutFileLen = (nInFileLen - nInFileExtLen) + strlen(pszTimeExtension) + 1;
+    pszOutFilePath = (char *) malloc(nOutFileLen * sizeof(char));
+    if (!pszOutFilePath) {
+        //error
+        return NULL;
+    }
+    bzero(pszOutFilePath, nOutFileLen * sizeof(char));
+
+    // use infile path + timestamp as new output file
+    strncpy(pszOutFilePath, pszInFilePath, nInFileLen - nInFileExtLen);  // remove extension to be added with the name
+    strcat(pszOutFilePath, pszTimeExtension);
+
+    // init vars, load files
+    pbInFile = solv_xfopen(pszInFilePath, "r");
+    if (!pbInFile) {
+        //error
+        return NULL;
+    }
+    pbOutFile = fopen(pszOutFilePath, "w");
+    if (!pbOutFile) {
+        //error
+        return NULL;
+    }
+
+    pData.nBufferMaxLen = DEFAULT_TIME_FILTER_BUFF_SIZE;
+    pData.pszElementBuffer = (char *) malloc(pData.nBufferMaxLen * sizeof(char));
+    if (!pData.pszElementBuffer) {
+        //error
+        return NULL;
+    }
+    bzero(pData.pszElementBuffer, pData.nBufferMaxLen);
+    pData.pbOutfile = pbOutFile;
+    pData.nSearchTime = nSnapshotTime;
+    pData.nDepth = 0;
+    pData.nBufferLen = 0;
+    pData.nInPackage = 0;
+    pData.nPrintPackage = 0;
+    pData.nTimeFound = 0;
+
+    //create parser
+    bParser = XML_ParserCreate(NULL);
+    if (!bParser) {
+        //error
+        return NULL;
+    }
+
+    XML_SetUserData(bParser, &pData);
+    XML_SetElementHandler(bParser, TDNFFilterStartElement, TDNFFilterEndElement);
+    XML_SetCharacterDataHandler(bParser, TDNFFilterCharDataHandler);
+
+    //parse XML
+    fprintf(pbOutFile, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    if (ferror(pbOutFile)) {
+        //error
+        return NULL;
+    }
+    int nInputEof;
+    do {
+        void * pszXMLParseBuffer = XML_GetBuffer(bParser, BUFSIZ);
+        if (!pszXMLParseBuffer) {
+            fprintf(stderr, "Couldn't allocate memory for buffer\n");
+            //error
+            return NULL;
+        }
+
+        const size_t len = fread(pszXMLParseBuffer, 1, BUFSIZ - 1, pbInFile);
+        ((char *)pszXMLParseBuffer)[len] = '\0';
+        if (ferror(pbInFile)) {
+            //error
+            return NULL;
+        }
+
+        nInputEof = feof(pbInFile);
+
+        if (XML_ParseBuffer(bParser, (int)len, nInputEof) == XML_STATUS_ERROR) {
+            fprintf(
+                stderr,
+                "Parse error at line %lu:\n%s\n",
+                XML_GetCurrentLineNumber(bParser),
+                XML_ErrorString(XML_GetErrorCode(bParser)));
+            //error
+            return NULL;
+        }
+    } while (!nInputEof);
+
+    if (pData.pszElementBuffer) {
+        free(pData.pszElementBuffer);
+    }
+
+    if (bParser) {
+        XML_ParserFree(bParser);
+    }
+
+    if (pbOutFile) {
+        fclose(pbOutFile);
+    }
+
+    if (pbInFile) {
+        fclose(pbInFile);
+    }
+
+    return pszOutFilePath;
+}
+// #### END XML SNAPSHOT FILTER CODE ####
+
 
 static const char * repodata_type_to_name(RepodataType type) {
     switch (type) {
@@ -236,6 +878,9 @@ SolvRepo::~SolvRepo() {
 void SolvRepo::load_repo_main(const std::string & repomd_fn, const std::string & primary_fn) {
     auto & logger = *base->get_logger();
     auto & pool = get_rpm_pool(base);
+    auto & main_config = config->get_main_config();
+    std::string & primary_snapshot_fn = NULL;
+
 
     fs::File repomd_file(repomd_fn, "r");
 
@@ -243,14 +888,26 @@ void SolvRepo::load_repo_main(const std::string & repomd_fn, const std::string &
 
     int solvables_start = pool->nsolvables;
 
-    if (load_solv_cache(pool, nullptr, 0)) {
-        main_solvables_start = solvables_start;
-        main_solvables_end = pool->nsolvables;
+    std::string snapshot_time = main_config.get_snapshot_time_option().get_value();
 
-        return;
+    if (!config.get_snapshot_exclude_option() && std::strcmp(snapshot_time, "") != 0) {
+        primary_snapshot_fn = string(SolvFilterFile(primary_fn, snapshot_time));
+    } else {
+        if (load_solv_cache(pool, nullptr, 0)) {
+            main_solvables_start = solvables_start;
+            main_solvables_end = pool->nsolvables;
+
+            return;
+        }
     }
 
-    fs::File primary_file(primary_fn, "r", true);
+    std::string & temp_fn = NULL;
+    if (primary_snapshot_fn != NULL) {
+        temp_fn = primary_snapshot_fn;
+    } else {
+        temp_fn = primary_fn;
+    }
+    fs::File primary_file(temp_fn, "r", true);
 
     logger.debug("Loading repomd and primary for repo \"{}\"", config.get_id());
     if (repo_add_repomdxml(repo, repomd_file.get(), 0) != 0) {

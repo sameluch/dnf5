@@ -215,6 +215,10 @@ public:
     OptionBool & get_build_cache_option();
     const OptionBool & get_build_cache_option() const;
 
+    // snapshot time config vars
+    OptionString & get_snapshot_time_option();
+    const OptionString & get_snapshot_time_option() const;
+
     // Repo main config
     OptionNumber<std::uint32_t> & get_retries_option();
     const OptionNumber<std::uint32_t> & get_retries_option() const;

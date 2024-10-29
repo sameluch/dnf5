@@ -39,6 +39,9 @@ class ConfigRepo::Impl {
     ConfigMain & main_config;
     std::string id;
 
+    // snapshot var
+    OptionBool snapshot_exclude{false};
+
     OptionString name{""};
     OptionChild<OptionBool> enabled{main_config.get_enabled_option()};
     OptionChild<OptionString> basecachedir{main_config.get_cachedir_option()};
@@ -102,6 +105,9 @@ ConfigRepo::Impl::Impl(Config & owner, ConfigMain & main_config, const std::stri
     owner.opt_binds().add("type", type);
     owner.opt_binds().add("mediaid", mediaid);
     owner.opt_binds().add("gpgkey", gpgkey);
+
+    //snapshot var
+    owner.opt_binds().add("snapshotexclude", snapshot_exclude);
 
     owner.opt_binds().add(
         "excludepkgs",
@@ -558,6 +564,13 @@ OptionChild<OptionBool> & ConfigRepo::get_build_cache_option() {
 }
 const OptionChild<OptionBool> & ConfigRepo::get_build_cache_option() const {
     return p_impl->build_cache;
+}
+
+OptionBool & ConfigRepo::get_snapshot_exclude_option() {
+    return p_impl->snapshot_exclude;
+}
+const OptionBool & ConfigRepo::get_snapshot_exclude_option() const {
+    return p_impl->snapshot_exclude;
 }
 
 

@@ -30,6 +30,7 @@ along with libdnf.  If not, see <https://www.gnu.org/licenses/>.
 #include "libdnf5/utils/fs/file.hpp"
 
 #include <solv/repo.h>
+#include <expat.h>
 
 #include <filesystem>
 
@@ -54,6 +55,26 @@ namespace libdnf5::repo {
 using LibsolvRepo = ::Repo;
 enum class RepodataType { FILELISTS, PRESTO, UPDATEINFO, COMPS, OTHER };
 
+typedef struct {
+    // frequently changed values
+    char * pszElementBuffer;
+    int nBufferLen;
+    int nInPackage;
+    int nPrintPackage;
+    int nTimeFound;
+
+    // managed values
+    int nBufferMaxLen;
+    int nDepth;
+    int nPrevElement; // enum 0 -> start, 1 -> data, 2 -> end
+
+    //set and forget on creation
+    time_t nSearchTime;
+    FILE * pbOutfile;
+} XMLFilterData;
+
+#define MAX_FILTER_INPUT_THRESHOLD 500000000
+#define DEFAULT_TIME_FILTER_BUFF_SIZE 16000
 
 class SolvError : public Error {
     using Error::Error;

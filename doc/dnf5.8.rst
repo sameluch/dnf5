@@ -272,6 +272,12 @@ Following options are applicable in the general context for any ``dnf5`` command
 ``--show-new-leaves``
     | Show newly installed leaf packages and packages that became leaves after a transaction.
 
+``--snapshot-time=POSIX_TIME``
+    | POSIX_TIME to be used by ``DNF5`` when creating clientside repository snapshots of each available repo.
+
+``--snapshot-exclude-repos=REPO_ID,...``
+    | Repos which should be specifically excluded from clientside repository snapshots.
+
 ``-y, --assumeyes``
     | Automatically answer yes for all questions.
 

@@ -220,6 +220,8 @@ class ConfigMain::Impl {
     OptionString bugtracker_url{BUGTRACKER};
     OptionBool zchunk{true};
 
+    OptionString snapshot_time{""};
+
     OptionEnum<std::string> color{"auto", {"auto", "never", "always"}, [](const std::string & value) {
                                       const std::array<const char *, 4> always{{"on", "yes", "1", "true"}};
                                       const std::array<const char *, 4> never{{"off", "no", "0", "false"}};
@@ -357,6 +359,9 @@ ConfigMain::Impl::Impl(Config & owner) : owner(owner) {
     owner.opt_binds().add("pluginpath", pluginpath);
     owner.opt_binds().add("pluginconfpath", pluginconfpath);
     owner.opt_binds().add("persistdir", persistdir);
+
+    //snapshot var
+    owner.opt_binds().add("snapshottime", snapshot_time);
 
     // Unless transaction_history_dir has been explicitly set, use the system_state_dir as its default
     owner.opt_binds().add(
@@ -1152,6 +1157,14 @@ OptionBool & ConfigMain::get_build_cache_option() {
 }
 const OptionBool & ConfigMain::get_build_cache_option() const {
     return p_impl->build_cache;
+}
+
+// snapshot time config
+OptionString & ConfigMain::get_snapshot_time_option() {
+    return p_impl->snapshot_time;
+}
+const OptionString & ConfigMain::get_snapshot_time_option() const {
+    return p_impl->snapshot_time;
 }
 
 // Repo main config

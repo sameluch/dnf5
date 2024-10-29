@@ -340,6 +340,35 @@ void RootCommand::set_argument_parser() {
         global_options_group->register_argument(exclude);
     }
 
+    auto snapshot_repo_time = parser.add_new_named_arg("snapshot-time");
+    snapshot_repo_time->set_long_name("snapshot-time");
+    snapshot_repo_time->set_has_value(true);
+    snapshot_repo_time->set_arg_value_help("posix_time");
+    snapshot_repo_time->set_description(
+        "Posix time to be used for clientside repository snapshot");
+    snapshot_repo_time->link_value(&config.get_snapshot_time_option());
+    global_options_group->register_argument(snapshot_repo_time);
+
+    auto snapshot_repo_exclude = parser.add_new_named_arg("snapshot-exclude-repos");
+    snapshot_repo_exclude->set_long_name("snapshot-exclude-repos");
+    snapshot_repo_exclude->set_has_value(true);
+    snapshot_repo_exclude->set_arg_value_help("REPO_ID,...");
+    snapshot_repo_exclude->set_description(
+        "Repos to exclude from clientside repository snapshot");
+    snapshot_repo_exclude->set_parse_hook_func([&ctx](
+            [[maybe_unused]] ArgumentParser::NamedArg * arg, 
+            [[maybe_unused]] const char * option, 
+            const char * value) {
+            
+            // Store the repositories enablement to vector. Use it later when repositories configuration will be loaded.
+            libdnf5::OptionStringList repoid_patterns(value);
+            for (auto & repoid_pattern : repoid_patterns.get_value()) {
+                ctx.setopts.emplace_back(repoid_pattern + ".snapshotexclude", "1");
+            }
+            return true;
+        });
+    global_options_group->register_argument(snapshot_repo_exclude);
+
     auto enable_repo_ids = parser.add_new_named_arg("enable-repo");
     enable_repo_ids->set_long_name("enable-repo");
     enable_repo_ids->set_has_value(true);

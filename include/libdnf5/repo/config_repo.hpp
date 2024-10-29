@@ -136,6 +136,10 @@ public:
     OptionString & get_enabled_metadata_option();
     const OptionString & get_enabled_metadata_option() const;
 
+    // snapshot exclude option for each repo
+    OptionBool & get_snapshot_exclude_option();
+    const OptionBool & get_snapshot_exclude_option() const;
+
     OptionChild<OptionString> & get_user_agent_option();
     const OptionChild<OptionString> & get_user_agent_option() const;
     OptionChild<OptionBool> & get_countme_option();
